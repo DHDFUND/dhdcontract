@@ -1,4 +1,4 @@
-pragma solidity ^0.5.9 < 0.7.0;
+pragma solidity ^0.5.17;
 
 interface IERC20 {
     
@@ -162,13 +162,14 @@ contract LPTokenWrapper {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    IERC20 public y ; //Token
+    IERC20 public _lp ; //Token
 
     uint256 private _totalSupply;
     mapping(address => uint256) private _balances;
 	
 	constructor (IERC20 ierc20) internal {
-	    y = ierc20;
+		require(ierc20 != IERC20(0));
+	    _lp = ierc20;
 	}
 	
     function totalSupply() public view returns (uint256) {
@@ -182,19 +183,19 @@ contract LPTokenWrapper {
     function stake(uint256 amount) public {
         _totalSupply = _totalSupply.add(amount);
         _balances[msg.sender] = _balances[msg.sender].add(amount);
-        y.safeTransferFrom(msg.sender, address(this), amount);
+        _lp.safeTransferFrom(msg.sender, address(this), amount);
     }
 
     function withdraw(uint256 amount) public {
         _totalSupply = _totalSupply.sub(amount);
         _balances[msg.sender] = _balances[msg.sender].sub(amount);
-        y.safeTransfer(msg.sender, amount);
+        _lp.safeTransfer(msg.sender, amount);
     }
 }
 
 contract owned {
     address public owner;
-
+	event ChangeOwnership(address indexed oldAddr,address indexed newAddr);
     constructor() public {
         owner = msg.sender;
     }
@@ -204,13 +205,15 @@ contract owned {
         _;
     }
 
-    function transferOwnership(address newOwner) onlyOwner public {
+    function transferOwnership(address newOwner) onlyOwner external {
+		require(newOwner != address(0));
+		emit ChangeOwnership(owner,newOwner);
         owner = newOwner;
     }
 }
 
 contract PoolReward is LPTokenWrapper,owned{
-	uint256 public constant oneday = 1 days;
+	uint256 private constant oneday = 1 days;
     IERC20 public rewardtoken = IERC20(0); 
     uint256[] public durations;
     uint256[] public initrewards;
@@ -218,22 +221,23 @@ contract PoolReward is LPTokenWrapper,owned{
     uint256 public starttime = 0; 
     uint256 public endtime = 0;
     uint256[] public durationEndtimes ;
-	uint256 public lastUpdateTime = 0;
+	uint256 private lastUpdateTime = 0;
     uint256 public rewardPerTokenStored = 0;
     mapping(address => uint256) public userRewardPerTokenPaid;
     mapping(address => uint256) public rewards;
-	address private ecoAddr = 0x000000000000000000000000000000000000dEaD;
-	address private teamAddr = 0x000000000000000000000000000000000000dEaD;
-	address private destroyAddr = 0x000000000000000000000000000000000000dEaD;
-	uint256 private destroyRatio = 10;
-	uint256 private ecoRatio = 10;
-	uint256 private teamRatio = 5;
+	address public ecoAddr = 0x000000000000000000000000000000000000dEaD;
+	address public teamAddr = 0x000000000000000000000000000000000000dEaD;
+	address public constant destroyAddr = 0x000000000000000000000000000000000000dEaD;
+	uint256 public constant destroyRatio = 10;
+	uint256 public constant ecoRatio = 10;
+	uint256 public constant teamRatio = 5;
     event Staked(address indexed addr, uint256 amount);
     event Withdrawn(address indexed addr, uint256 amount);
     event UserRewardPaid(address indexed addr, uint256 reward);
 	event EcoRewardPaid(address indexed addr, uint256 reward);
 	event TeamRewardPaid(address indexed addr, uint256 reward);
 	event DestroyRewardPaid(address indexed addr, uint256 reward);
+	event changeEcoTeamAddrs(address indexed ecoAddr, address teamAddr,address indexed ecoNewAddr, address teamNewAddr);
 
 	constructor(address _ecoAddr,address _teamAddr,address _lptoken,address _rewardtoken,uint256 _starttime,uint256[] memory _initrewards,uint256[] memory _durations) LPTokenWrapper(IERC20(_lptoken)) public{
 	    require (_initrewards.length > 0 &&_initrewards.length == _durations.length,"length not match");
@@ -252,10 +256,13 @@ contract PoolReward is LPTokenWrapper,owned{
 	    }	
 	}
 	
-	function setAddrs(address _ecoAddr,address _teamAddr) onlyOwner public {
+	function setAddrs(address _ecoAddr,address _teamAddr) onlyOwner external {
 		require(_ecoAddr!=address(0)&&_teamAddr!=address(0));
+		address ecoOldAddr = ecoAddr;
+		address teamOldAddr = teamAddr;
 		ecoAddr = _ecoAddr;
 		teamAddr = _teamAddr;
+		emit changeEcoTeamAddrs(ecoOldAddr,teamOldAddr,ecoAddr,teamAddr);
     }
 	
 	modifier updateReward(address account) {
@@ -357,7 +364,7 @@ contract PoolReward is LPTokenWrapper,owned{
     }
 
     function getReward() public  updateReward(msg.sender)  {
-        uint256 reward = earned(msg.sender);
+        uint256 reward = rewards[msg.sender];
         if (reward > 0) {
             rewards[msg.sender] = 0;
 			uint256 userReward = reward.mul(100-destroyRatio-ecoRatio-teamRatio).div(100);
